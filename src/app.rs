@@ -1,20 +1,97 @@
+use std::collections::HashMap;
+
+use chrono::{Local, NaiveDate};
+use egui_extras::DatePickerButton;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Default)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
-    // Example stuff:
-    label: String,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
+    add_new_list: bool,
+    list_namager: ListManager,
+    new_list_name: String,
 }
 
-impl Default for TemplateApp {
-    fn default() -> Self {
-        Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+struct ListManager {
+    todo_lists: HashMap<String, TodoList>,
+    current_list_name: String,
+    add_new_list: bool,
+}
+
+impl ListManager {
+    pub fn show(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        if ui.button("All List").clicked() {
+            self.add_new_list = true;
+        }
+
+        if self.add_new_list {
+            egui::Window::new("Add New List").show(ctx, |ui| {
+                ui.text_edit_singleline(&mut self.current_list_name);
+                if ui.button("Add List").clicked() && !self.current_list_name.is_empty() {
+                    let list_name = std::mem::take(&mut self.current_list_name);
+                    self.todo_lists.insert(
+                        list_name.clone(),
+                        TodoList {
+                            list_name,
+                            items: Vec::new(),
+                            current_item_name: String::new(),
+                            current_list_date: NaiveDate::default(),
+                        },
+                    );
+                    self.add_new_list = false;
+                }
+            });
+        }
+
+        ui.horizontal(|ui| {
+            ui.separator();
+            for lists in self.todo_lists.iter_mut() {
+                let name = lists.0;
+                let list = lists.1;
+                egui::Window::new(name).show(ctx, |ui| {
+                    list.show(ui);
+                });
+            }
+        });
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ListItem {
+    name: String,
+    completed: bool,
+    date: NaiveDate,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct TodoList {
+    list_name: String,
+    items: Vec<ListItem>,
+    current_item_name: String,
+    current_list_date: NaiveDate,
+}
+
+impl TodoList {
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        for item in self.items.iter_mut() {
+            if ui.radio(item.completed, &item.name).clicked() {
+                item.completed = !item.completed;
+            }
+            ui.separator();
+            ui.label(item.date.to_string());
+        }
+
+        ui.text_edit_singleline(&mut self.current_item_name);
+        ui.add(DatePickerButton::new(&mut self.current_list_date));
+
+        if ui.button("Add Item").clicked() {
+            let name = std::mem::take(&mut self.current_item_name);
+            self.items.push(ListItem {
+                name,
+                completed: false,
+                date: self.current_list_date.clone()
+            });
         }
     }
 }
@@ -27,6 +104,7 @@ impl TemplateApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
+
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
@@ -67,19 +145,9 @@ impl eframe::App for TemplateApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.heading("Rudium Planner");
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
-
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
-            }
-
-            ui.separator();
+            self.list_namager.show(ctx, ui);
 
             ui.add(egui::github_link_file!(
                 "https://github.com/emilk/eframe_template/blob/master/",
